@@ -77,3 +77,32 @@ func TestGitignoreBlockRoundtripAndNamespace(t *testing.T) {
 		t.Errorf("RemoveGitignore = %q, %v; want %q, true", back, ok, base)
 	}
 }
+
+func TestGitignoreIDPrefixDoesNotMatchLongerID(t *testing.T) {
+	out := UpsertGitignore("", "x", "cache-v2", "/v2/")
+	out = UpsertGitignore(out, "x", "cache", "/v1/")
+	if strings.Count(out, "gitignore:start=") != 2 || !strings.Contains(out, "start=cache-v2\n/v2/\n") ||
+		!strings.Contains(out, "start=cache\n/v1/\n") {
+		t.Fatalf("installing id cache after cache-v2 must add its own block:\n%s", out)
+	}
+	out, ok := RemoveGitignore(out, "x", "cache")
+	if !ok || out != "\n# ext:x:gitignore:start=cache-v2\n/v2/\n# ext:x:gitignore:end=cache-v2\n" {
+		t.Errorf("removing cache must leave cache-v2 intact: ok=%v\n%q", ok, out)
+	}
+	if _, ok := RemoveGitignore(out, "x", "cache"); ok {
+		t.Error("RemoveGitignore must not match the longer id cache-v2")
+	}
+}
+
+func TestRemoveBlockKeepsUserBlankLines(t *testing.T) {
+	for _, base := range []string{"a\n\n", "a\n\n\n", "a\n", ""} {
+		out, _ := RemoveGitignore(UpsertGitignore(base, "x", "c", "/c/"), "x", "c")
+		if out != base {
+			t.Errorf("round trip of %q gave %q", base, out)
+		}
+		out, _ = RemoveSection(UpsertSection(base, "x", "c", "body"), "x", "c")
+		if out != base {
+			t.Errorf("section round trip of %q gave %q", base, out)
+		}
+	}
+}

@@ -214,8 +214,13 @@ forbids cross-extension dependencies (declare none).
    `.gitignore` is created if there is none, re-install/update replaces the
    block in place, and remove deletes it. Remove also deletes a `.gitignore`
    left holding nothing but whitespace, so an install that created the file
-   leaves no trace. Lines outside the block are never touched. A cg older than
-   this contribution point ignores the key, so the block is simply not written.
+   leaves no trace (this also removes a `.gitignore` the user had left empty
+   before the install). Lines outside the block are never touched. Markers are
+   matched as whole lines, so an id that is a prefix of another (`cache`,
+   `cache-v2`) never matches the longer one.
+   A cg older than this contribution point ignores the key: it doesn't write the
+   block, and it doesn't know about a block a newer cg wrote, so its `remove`
+   leaves that block behind.
 
 ## `cg extension` subcommand suite
 
