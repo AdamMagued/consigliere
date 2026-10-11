@@ -479,6 +479,7 @@ func printInstallSummary(cmd *cobra.Command, m *extension.Manifest, dest, source
 		}
 	}
 	add(len(c.ClaudeMDSections), "CLAUDE.md section(s)")
+	add(len(c.Gitignore), ".gitignore block(s)")
 	add(len(c.Notes), "note(s)")
 	add(len(c.Hooks), "hook(s)")
 	add(len(c.GitHooks), "git hook script(s)")

@@ -64,6 +64,18 @@ func TestValidateRejects(t *testing.T) {
 			"invalid id",
 		},
 		{
+			"bad gitignore id",
+			Manifest{Manifest: 1, Name: "a", Version: "1.0.0", Description: "d",
+				Contributes: Contributions{Gitignore: []SectionContribution{{ID: "Bad ID", Path: "p"}}}},
+			"invalid id",
+		},
+		{
+			"gitignore missing path",
+			Manifest{Manifest: 1, Name: "a", Version: "1.0.0", Description: "d",
+				Contributes: Contributions{Gitignore: []SectionContribution{{ID: "ok", Path: ""}}}},
+			"gitignore[0]: path is required",
+		},
+		{
 			"section missing path",
 			Manifest{Manifest: 1, Name: "a", Version: "1.0.0", Description: "d",
 				Contributes: Contributions{ClaudeMDSections: []SectionContribution{{ID: "ok", Path: ""}}}},
@@ -171,12 +183,13 @@ func TestValidateRejectsEscapingPaths(t *testing.T) {
 	}
 	for _, escape := range []string{"../outside.md", "/etc/passwd", "a/../../b.md"} {
 		cases := map[string]Contributions{
-			"section path":  {ClaudeMDSections: []SectionContribution{{ID: "rules", Path: escape}}},
-			"note src":      {Notes: []CopyContribution{{Src: escape, Dest: "notes/a.md"}}},
-			"note dest":     {Notes: []CopyContribution{{Src: "notes/a.md", Dest: escape}}},
-			"template src":  {Templates: []CopyContribution{{Src: escape, Dest: "templates/a.md"}}},
-			"template dest": {Templates: []CopyContribution{{Src: "t/a.md", Dest: escape}}},
-			"hook wrapper":  {Hooks: []HookContribution{{Event: "SessionStart", Wrapper: escape, Command: "demo gate"}}},
+			"section path":   {ClaudeMDSections: []SectionContribution{{ID: "rules", Path: escape}}},
+			"note src":       {Notes: []CopyContribution{{Src: escape, Dest: "notes/a.md"}}},
+			"note dest":      {Notes: []CopyContribution{{Src: "notes/a.md", Dest: escape}}},
+			"template src":   {Templates: []CopyContribution{{Src: escape, Dest: "templates/a.md"}}},
+			"template dest":  {Templates: []CopyContribution{{Src: "t/a.md", Dest: escape}}},
+			"gitignore path": {Gitignore: []SectionContribution{{ID: "ignore", Path: escape}}},
+			"hook wrapper":   {Hooks: []HookContribution{{Event: "SessionStart", Wrapper: escape, Command: "demo gate"}}},
 		}
 		for name, c := range cases {
 			if err := base(c).Validate(); err == nil {

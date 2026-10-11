@@ -21,6 +21,40 @@ func sectionMarkers(name, id string) (start, end string) {
 // newline (matching the framework's section padding).
 func UpsertSection(content, name, id, body string) string {
 	start, end := sectionMarkers(name, id)
+	return upsertBlock(content, start, end, body)
+}
+
+// RemoveSection deletes the ext:<name>:section=<id> block (markers included),
+// returning the new content and whether the block was found. It also trims the
+// blank line that UpsertSection inserted before the block, so repeated
+// add/remove cycles don't accumulate blank lines.
+func RemoveSection(content, name, id string) (string, bool) {
+	start, end := sectionMarkers(name, id)
+	return removeBlock(content, start, end)
+}
+
+// Extension .gitignore blocks use the same scheme as CLAUDE.md sections, with
+// #-comment markers so git reads them as comments.
+func gitignoreMarkers(name, id string) (start, end string) {
+	return fmt.Sprintf("# ext:%s:gitignore:start=%s", name, id),
+		fmt.Sprintf("# ext:%s:gitignore:end=%s", name, id)
+}
+
+// UpsertGitignore inserts or replaces the ext:<name>:gitignore=<id> block, as
+// UpsertSection does for CLAUDE.md.
+func UpsertGitignore(content, name, id, body string) string {
+	start, end := gitignoreMarkers(name, id)
+	return upsertBlock(content, start, end, body)
+}
+
+// RemoveGitignore deletes the ext:<name>:gitignore=<id> block, as RemoveSection
+// does for CLAUDE.md.
+func RemoveGitignore(content, name, id string) (string, bool) {
+	start, end := gitignoreMarkers(name, id)
+	return removeBlock(content, start, end)
+}
+
+func upsertBlock(content, start, end, body string) string {
 	si := strings.Index(content, start)
 	if si >= 0 {
 		afterStart := si + len(start)
@@ -35,12 +69,7 @@ func UpsertSection(content, name, id, body string) string {
 	return content + fmt.Sprintf("\n%s\n%s\n%s\n", start, body, end)
 }
 
-// RemoveSection deletes the ext:<name>:section=<id> block (markers included),
-// returning the new content and whether the block was found. It also trims the
-// blank line that UpsertSection inserted before the block, so repeated
-// add/remove cycles don't accumulate blank lines.
-func RemoveSection(content, name, id string) (string, bool) {
-	start, end := sectionMarkers(name, id)
+func removeBlock(content, start, end string) (string, bool) {
 	si := strings.Index(content, start)
 	if si < 0 {
 		return content, false

@@ -36,6 +36,9 @@ func makeClone(t *testing.T, m *Manifest) string {
 	for _, g := range m.Contributes.GitHooks {
 		write(g.Script, "#!/bin/sh\nexit 0\n")
 	}
+	for _, g := range m.Contributes.Gitignore {
+		write(g.Path, "\n/demo-cache/\n*.demo\n")
+	}
 	return dir
 }
 
@@ -197,6 +200,12 @@ func TestOrphanLedger(t *testing.T) {
 		t.Errorf("hook orphans wrong: %+v", orphan.Hooks)
 	}
 
+	gOld := &Ledger{Name: "demo", Gitignore: []string{"keep", "drop"}}
+	gNext := &Ledger{Name: "demo", Gitignore: []string{"keep"}}
+	if g := OrphanLedger(gOld, gNext); g == nil || len(g.Gitignore) != 1 || g.Gitignore[0] != "drop" {
+		t.Errorf("gitignore orphans wrong: %+v", g)
+	}
+
 	// Identical ledgers produce no orphans; nil old is nil.
 	if OrphanLedger(next, next) != nil {
 		t.Error("identical ledgers should have no orphans")
@@ -298,4 +307,90 @@ func TestApplyAndReverseGitHook(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(want))); !os.IsNotExist(err) {
 		t.Errorf("script not removed: %v", err)
 	}
+}
+
+func gitignoreManifest() *Manifest {
+	return &Manifest{
+		Manifest: 1, Name: "demo", Version: "1.0.0", Description: "d",
+		Contributes: Contributions{
+			Gitignore: []SectionContribution{{ID: "cache", Path: "gitignore/cache"}},
+		},
+	}
+}
+
+func TestApplyAndReverseGitignore(t *testing.T) {
+	root := t.TempDir()
+	const base = "# user rules\n.DS_Store\nnode_modules/\n"
+	path := filepath.Join(root, ".gitignore")
+	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := gitignoreManifest()
+	clone := makeClone(t, m)
+
+	ledger, err := Apply(root, clone, m)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	want := base + "\n# ext:demo:gitignore:start=cache\n/demo-cache/\n*.demo\n# ext:demo:gitignore:end=cache\n"
+	if string(got) != want {
+		t.Errorf(".gitignore after apply:\n got: %q\nwant: %q", got, want)
+	}
+	if len(ledger.Gitignore) != 1 || ledger.Gitignore[0] != "cache" {
+		t.Errorf("ledger gitignore = %+v", ledger.Gitignore)
+	}
+
+	// Reapplying (update) replaces the block in place rather than appending another.
+	if _, err := Apply(root, clone, m); err != nil {
+		t.Fatalf("reapply: %v", err)
+	}
+	got, _ = os.ReadFile(path)
+	if string(got) != want {
+		t.Errorf("reapply should be idempotent:\n got: %q\nwant: %q", got, want)
+	}
+
+	if err := Reverse(root, ledger); err != nil {
+		t.Fatalf("Reverse: %v", err)
+	}
+	assertFile(t, path, base)
+}
+
+func TestReverseGitignoreDeletesFileItCreated(t *testing.T) {
+	root := t.TempDir()
+	m := gitignoreManifest()
+	ledger, err := Apply(root, makeClone(t, m), m)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	path := filepath.Join(root, ".gitignore")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("Apply should create .gitignore: %v", err)
+	}
+	if err := Reverse(root, ledger); err != nil {
+		t.Fatalf("Reverse: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf(".gitignore holding only the extension's block should be deleted, stat err=%v", err)
+	}
+}
+
+func TestApplyRollsBackGitignoreOnError(t *testing.T) {
+	root := t.TempDir()
+	const base = ".DS_Store\n"
+	path := filepath.Join(root, ".gitignore")
+	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := gitignoreManifest()
+	m.Contributes.Templates = []CopyContribution{{Src: "tpl/t.md", Dest: "templates/demo.md"}}
+	clone := makeClone(t, m)
+	// Templates apply after gitignore blocks; a missing source fails the apply.
+	if err := os.Remove(filepath.Join(clone, "tpl", "t.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(root, clone, m); err == nil {
+		t.Fatal("expected Apply to fail on the missing template source")
+	}
+	assertFile(t, path, base)
 }

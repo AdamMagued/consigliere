@@ -61,3 +61,19 @@ func TestUpsertSectionNamespacing(t *testing.T) {
 		t.Errorf("removing a's block must not touch b's:\n%s", out)
 	}
 }
+
+func TestGitignoreBlockRoundtripAndNamespace(t *testing.T) {
+	base := ".DS_Store\n"
+	out := UpsertGitignore(base, "demo", "cache", "/cache/")
+	if !strings.Contains(out, "# ext:demo:gitignore:start=cache\n/cache/\n# ext:demo:gitignore:end=cache\n") {
+		t.Errorf("gitignore block not written with # markers:\n%q", out)
+	}
+	// A CLAUDE.md section with the same name and id is a different block.
+	if _, ok := RemoveSection(out, "demo", "cache"); ok {
+		t.Error("RemoveSection must not match a gitignore block")
+	}
+	back, ok := RemoveGitignore(out, "demo", "cache")
+	if !ok || back != base {
+		t.Errorf("RemoveGitignore = %q, %v; want %q, true", back, ok, base)
+	}
+}
