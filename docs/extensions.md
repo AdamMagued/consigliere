@@ -215,7 +215,7 @@ forbids cross-extension dependencies (declare none).
    block in place, and remove deletes it. Remove also deletes a `.gitignore`
    left holding nothing but whitespace, so an install that created the file
    leaves no trace (this also removes a `.gitignore` the user had left empty
-   before the install). Lines outside the block are never touched. Markers are
+   before the install). Lines outside the block are kept; the only edits outside it are a final newline added to a file that lacks one, and the one blank line put before the block, which remove takes away again. Markers are
    matched as whole lines, so an id that is a prefix of another (`cache`,
    `cache-v2`) never matches the longer one.
    A cg older than this contribution point ignores the key: it doesn't write the

@@ -106,3 +106,23 @@ func TestRemoveBlockKeepsUserBlankLines(t *testing.T) {
 		}
 	}
 }
+
+func TestIndexLineEdgeCases(t *testing.T) {
+	const m = "# ext:x:gitignore:start=c"
+	cases := []struct {
+		content string
+		want    int
+	}{
+		{m + "\nrest\n", 0},     // at file start
+		{"a\n" + m, 2},          // at EOF with no newline
+		{"a\n" + m + "\r\n", 2}, // followed by CRLF
+		{"a " + m + "\n", -1},   // inside a line
+		{m + "-v2\n", -1},       // prefix of a longer id
+		{"# ext:x\n" + m + "-v2\n" + m + "\n", 8 + len(m) + 4}, // near-matches before the real one
+	}
+	for _, c := range cases {
+		if got := indexLine(c.content, m); got != c.want {
+			t.Errorf("indexLine(%q) = %d, want %d", c.content, got, c.want)
+		}
+	}
+}
