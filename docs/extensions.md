@@ -118,6 +118,9 @@ forbids cross-extension dependencies (declare none).
     ],
     "git-hooks": [
       { "hook": "post-commit", "script": "git-hooks/check.sh" }
+    ],
+    "gitignore": [
+      { "id": "1password-cache", "path": "fragments/gitignore" }
     ]
   }
 }
@@ -131,7 +134,7 @@ forbids cross-extension dependencies (declare none).
 | `name` | string | yes | Short, lowercase, `[a-z0-9-]+`. The install name, the `.cg.json` key, the clone directory, the `ext:<name>:section` namespace, and the `cg-<name>` binary stem. Must be unique in the registry. |
 | `version` | string | yes | Extension semver. Recorded in `.cg.json`; compared on `cg extension update`. |
 | `description` | string | yes | One line, shown in `cg extension list` and the registry. |
-| `contributes` | object | yes | The contribution points (all six keys below). Each is an array; an empty/absent array means "contributes nothing of this type". |
+| `contributes` | object | yes | The contribution points (all seven keys below). Each is an array; an empty/absent array means "contributes nothing of this type". |
 
 ### Contribution points
 
@@ -204,6 +207,21 @@ forbids cross-extension dependencies (declare none).
      write into a directory that may be versioned or shared.
    - Requires git 2.31 or later (`rev-parse --path-format`).
 
+7. **`gitignore`** — `[{ id, path }]`. Inserts the lines in `path` into the
+   workspace `.gitignore` as an extension-owned block, delimited by
+   `# ext:<name>:gitignore:start=<id>` / `# ext:<name>:gitignore:end=<id>`
+   (comments, so git ignores the markers). It works like `claude-md-sections`:
+   `.gitignore` is created if there is none, re-install/update replaces the
+   block in place, and remove deletes it. Remove also deletes a `.gitignore`
+   left holding nothing but whitespace, so an install that created the file
+   leaves no trace (this also removes a `.gitignore` the user had left empty
+   before the install). Lines outside the block are kept; the only edits outside it are a final newline added to a file that lacks one, and the one blank line put before the block, which remove takes away again. Markers are
+   matched as whole lines, so an id that is a prefix of another (`cache`,
+   `cache-v2`) never matches the longer one.
+   A cg older than this contribution point ignores the key: it doesn't write the
+   block, and it doesn't know about a block a newer cg wrote, so its `remove`
+   leaves that block behind.
+
 ## `cg extension` subcommand suite
 
 | Command | Behaviour |
@@ -274,7 +292,8 @@ diff. Not user-edited.
   "templates": ["templates/credential-request.md"],
   "subcommands": [{ "namespace": "secret", "binary": "cg-1password" }],
   "indexRows": [{ "file": "notes/INDEX.md", "marker": "ext:1password" }],
-  "gitHooks": [".cg/git-hooks/post-commit.d/1password-check.sh"]
+  "gitHooks": [".cg/git-hooks/post-commit.d/1password-check.sh"],
+  "gitignore": ["1password-cache"]
 }
 ```
 

@@ -30,6 +30,8 @@ type Ledger struct {
 	IndexRows        []LedgerIndexRow         `json:"indexRows,omitempty"`
 	// GitHooks are the workspace-relative paths of installed git-hook scripts.
 	GitHooks []string `json:"gitHooks,omitempty"`
+	// Gitignore are the ids of the ext:<name>:gitignore blocks in .gitignore.
+	Gitignore []string `json:"gitignore,omitempty"`
 }
 
 // LedgerHook records an installed hook wrapper so remove can delete it and

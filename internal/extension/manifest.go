@@ -55,6 +55,7 @@ type Contributions struct {
 	Subcommands      []SubcommandContribution `json:"subcommands,omitempty"`
 	Templates        []CopyContribution       `json:"templates,omitempty"`
 	GitHooks         []GitHookContribution    `json:"git-hooks,omitempty"`
+	Gitignore        []SectionContribution    `json:"gitignore,omitempty"`
 }
 
 // SectionContribution inserts the body of Path into the workspace CLAUDE.md as
@@ -136,6 +137,17 @@ func (m *Manifest) Validate() error {
 		}
 		if err := insideDir("path", s.Path, "extension"); err != nil {
 			return fmt.Errorf("claude-md-sections[%d]: %w", i, err)
+		}
+	}
+	for i, g := range m.Contributes.Gitignore {
+		if !nameRe.MatchString(g.ID) {
+			return fmt.Errorf("gitignore[%d]: invalid id %q: must match %s", i, g.ID, nameRe.String())
+		}
+		if g.Path == "" {
+			return fmt.Errorf("gitignore[%d]: path is required", i)
+		}
+		if err := insideDir("path", g.Path, "extension"); err != nil {
+			return fmt.Errorf("gitignore[%d]: %w", i, err)
 		}
 	}
 	for i, c := range m.Contributes.Notes {

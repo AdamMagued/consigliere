@@ -16,6 +16,9 @@ const claudeMDName = "CLAUDE.md"
 // settingsRel is the Claude Code settings file hook contributions register in.
 const settingsRel = ".claude/settings.json"
 
+// gitignoreName is the workspace .gitignore that gitignore blocks go into.
+const gitignoreName = ".gitignore"
+
 // hooksDirRel is where hook wrappers are installed.
 const hooksDirRel = ".claude/hooks"
 
@@ -23,7 +26,7 @@ const hooksDirRel = ".claude/hooks"
 // root and returns a ledger of exactly what was written, for clean removal.
 //
 // It is fully transactional: every workspace file it may modify (CLAUDE.md,
-// settings.json, each copied note/template, each hook wrapper) is snapshotted
+// settings.json, .gitignore, each copied note/template, each hook wrapper) is snapshotted
 // before any change, and on failure the snapshot is restored — so a failed
 // apply leaves the workspace byte-for-byte as it was, even when contributions
 // overwrite files a prior install of the same extension already placed.
@@ -39,6 +42,9 @@ func Apply(root, cloneDir string, m *Manifest) (*Ledger, error) {
 		return nil, err
 	}
 	if err := capture(settingsRel); err != nil {
+		return nil, err
+	}
+	if err := capture(gitignoreName); err != nil {
 		return nil, err
 	}
 	for _, n := range m.Contributes.Notes {
@@ -78,6 +84,12 @@ func applyAll(root, cloneDir string, m *Manifest, l *Ledger) error {
 			return e
 		}
 		l.ClaudeMDSections = append(l.ClaudeMDSections, s.ID)
+	}
+	for _, g := range m.Contributes.Gitignore {
+		if e := applyGitignore(root, cloneDir, m.Name, g); e != nil {
+			return e
+		}
+		l.Gitignore = append(l.Gitignore, g.ID)
 	}
 	for _, n := range m.Contributes.Notes {
 		if e := copyInto(cloneDir, root, n.Src, n.Dest); e != nil {
@@ -146,6 +158,9 @@ func Reverse(root string, l *Ledger) error {
 			return err
 		}
 	}
+	if err := reverseGitignore(root, l); err != nil {
+		return err
+	}
 	for _, rel := range l.Notes {
 		if err := removeIfPresent(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
 			return err
@@ -207,8 +222,14 @@ func OrphanLedger(old, next *Ledger) *Ledger {
 			orphan.GitHooks = append(orphan.GitHooks, p)
 		}
 	}
+	for _, id := range old.Gitignore {
+		if !containsStr(next.Gitignore, id) {
+			orphan.Gitignore = append(orphan.Gitignore, id)
+		}
+	}
 	if len(orphan.ClaudeMDSections) == 0 && len(orphan.Notes) == 0 &&
-		len(orphan.Templates) == 0 && len(orphan.Hooks) == 0 && len(orphan.GitHooks) == 0 {
+		len(orphan.Templates) == 0 && len(orphan.Hooks) == 0 && len(orphan.GitHooks) == 0 &&
+		len(orphan.Gitignore) == 0 {
 		return nil
 	}
 	return orphan
@@ -247,6 +268,55 @@ func applySection(root, cloneDir, name string, s SectionContribution) error {
 	}
 	next := UpsertSection(string(content), name, s.ID, strings.Trim(string(body), "\n"))
 	return os.WriteFile(claudePath, []byte(next), 0o644) //nolint:gosec // workspace file
+}
+
+// applyGitignore inserts or replaces the extension's block in the workspace
+// .gitignore, creating the file if there is none.
+func applyGitignore(root, cloneDir, name string, g SectionContribution) error {
+	body, err := os.ReadFile(filepath.Join(cloneDir, filepath.FromSlash(g.Path)))
+	if err != nil {
+		return fmt.Errorf("gitignore %q: %w", g.ID, err)
+	}
+	path := filepath.Join(root, gitignoreName)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		content = nil
+	}
+	next := UpsertGitignore(string(content), name, g.ID, strings.Trim(string(body), "\n"))
+	return os.WriteFile(path, []byte(next), 0o644) //nolint:gosec // workspace file
+}
+
+// reverseGitignore removes the blocks recorded in l from the workspace
+// .gitignore. A file left with nothing but whitespace is deleted, so an install
+// that created .gitignore leaves no trace.
+func reverseGitignore(root string, l *Ledger) error {
+	if len(l.Gitignore) == 0 {
+		return nil
+	}
+	path := filepath.Join(root, gitignoreName)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	text, changed := string(content), false
+	for _, id := range l.Gitignore {
+		if next, ok := RemoveGitignore(text, l.Name, id); ok {
+			text, changed = next, true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if strings.TrimSpace(text) == "" {
+		return removeIfPresent(path)
+	}
+	return os.WriteFile(path, []byte(text), 0o644) //nolint:gosec // workspace file
 }
 
 // applyHook copies the wrapper into .claude/hooks/ (executable) and registers it
