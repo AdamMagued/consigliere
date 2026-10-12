@@ -3,6 +3,7 @@ package workspace
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -116,7 +117,7 @@ func (c *Config) RemoveExtension(name string) bool {
 	return false
 }
 
-// Save writes the config back to <dir>/.cg.json as indented JSON. Round-trips
+// Save writes the config back to <dir>/.cg.json as indented JSON, atomically. Round-trips
 // through the typed Config, matching how `cg init` writes the file; any field
 // not modeled here is not preserved (the struct models the full schema).
 func (c *Config) Save(dir string) error {
@@ -124,7 +125,32 @@ func (c *Config) Save(dir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, ConfigFile), append(data, '\n'), 0o644) //nolint:gosec // ConfigFile is a fixed name under dir
+	// Atomic, so a cg command in a parallel session never reads a truncated
+	// .cg.json while an extension install or update rewrites it.
+	// A symlinked .cg.json is written through, as os.WriteFile did, rather
+	// than replaced by a regular file.
+	path := filepath.Join(dir, ConfigFile)
+	resolved, err := filepath.EvalSymlinks(path)
+	switch {
+	case err == nil:
+		path = resolved
+	case !errors.Is(err, fs.ErrNotExist):
+		return err
+	}
+	perm := os.FileMode(0o644)
+	info, err := os.Stat(path)
+	switch {
+	case err == nil:
+		// A file without its owner write bit is refused, as the in-place
+		// write was; the rename would otherwise drop the protection.
+		if info.Mode().Perm()&0o200 == 0 {
+			return &fs.PathError{Op: "write", Path: path, Err: fs.ErrPermission}
+		}
+		perm = info.Mode().Perm()
+	case !errors.Is(err, fs.ErrNotExist):
+		return err
+	}
+	return replaceFile(path, append(data, '\n'), perm)
 }
 
 // WorktreeConfig tunes `cg worktree`. Root overrides the prefix used to derive
