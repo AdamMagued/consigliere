@@ -84,12 +84,22 @@ func TestRunUpstreamTimesOut(t *testing.T) {
 	defer func() { upstreamTimeout = saved }()
 
 	start := time.Now()
-	got := runUpstream(context.Background(), "sleep 5", nil)
+	// "; :" keeps bash from exec'ing sleep, so killing bash leaves sleep
+	// holding stdout open, as killing Git Bash always does on Windows.
+	got := runUpstream(context.Background(), "sleep 5; :", nil)
 	if got != "" {
 		t.Errorf("expected empty output on timeout, got %q", got)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Errorf("runUpstream did not honor the timeout: took %s", elapsed)
+	}
+}
+
+// An upstream that prints its line and leaves a background child holding
+// stdout keeps its line.
+func TestRunUpstreamKeepsOutputWithBackgroundChild(t *testing.T) {
+	if got := runUpstream(context.Background(), "echo hi; (sleep 1) &", nil); got != "hi" {
+		t.Errorf("runUpstream = %q, want hi", got)
 	}
 }
 

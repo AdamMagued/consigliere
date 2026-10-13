@@ -325,3 +325,27 @@ func TestHashBodyCRLF(t *testing.T) {
 		t.Error("HashBody != HashContent for a CRLF note with no frontmatter")
 	}
 }
+
+// consigliere#168: Git for Windows checks files out with CRLF, and a CRLF copy
+// of cg's content must still read as cg's.
+func TestCRLFContentHashesAndParsesAsLF(t *testing.T) {
+	lf := "# CLAUDE.md\n<!-- cg:section:start=s -->\nbody\nmore\n<!-- cg:section:end=s -->\n"
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+	if HashContent(crlf) != HashContent(lf) {
+		t.Error("CRLF content hashes differently from LF")
+	}
+	if HashBody("---\r\ntitle: x\r\n---\r\n\r\nbody\r\n") != HashBody("body\n") {
+		t.Error("CRLF note body hashes differently from LF")
+	}
+	if got := ParseSections(crlf)["s"]; got != "body\nmore" {
+		t.Errorf("section of a CRLF CLAUDE.md = %q, want %q", got, "body\nmore")
+	}
+}
+
+func TestAllCRLF(t *testing.T) {
+	for s, want := range map[string]bool{"": false, "a": false, "a\r\nb\r\n": true, "a\r\nb": true, "a\r\nb\n": false, "a\n": false} {
+		if got := AllCRLF(s); got != want {
+			t.Errorf("AllCRLF(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
