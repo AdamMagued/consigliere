@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +16,9 @@ import (
 )
 
 // Run executes `git <args...>` in dir (or the current directory if dir is "")
-// and returns trimmed stdout. On failure the error wraps git's stderr.
+// and returns trimmed stdout. On failure the error wraps git's stderr, and a
+// failure to reach or to authenticate to a remote also wraps
+// ErrRemoteUnreachable or ErrRemoteAuth, so callers can test it with errors.Is.
 func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	return RunEnv(ctx, dir, nil, args...)
 }
@@ -33,6 +34,12 @@ func RunEnv(ctx context.Context, dir string, env []string, args ...string) (stri
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	if touchesRemote(args) {
+		// Git translates its own messages under LANG, and classifyRemote
+		// matches some of them; LC_ALL=C keeps them in English. The caller's
+		// env comes after it, so an explicit LC_ALL still wins.
+		env = append([]string{"LC_ALL=C"}, env...)
+	}
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
@@ -40,11 +47,7 @@ func RunEnv(ctx context.Context, dir string, env []string, args ...string) (stri
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	if err := cmd.Run(); err != nil {
-		stderr := strings.TrimSpace(errb.String())
-		if stderr != "" {
-			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, stderr)
-		}
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return "", runError(args, err, errb.String())
 	}
 	return strings.TrimSpace(out.String()), nil
 }
@@ -62,10 +65,7 @@ func RunRaw(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	if err := cmd.Run(); err != nil {
-		if stderr := strings.TrimSpace(errb.String()); stderr != "" {
-			return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, stderr)
-		}
-		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return nil, runError(args, err, errb.String())
 	}
 	return out.Bytes(), nil
 }
