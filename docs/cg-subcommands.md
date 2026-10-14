@@ -58,9 +58,8 @@ commits (unless `--force`).
 
 ### Remote failures
 
-Every git invocation that talks to a remote (`fetch`, `pull`, `push`, `clone`,
-`ls-remote`) goes through `internal/gitx`, which classifies a failed one's
-stderr: `gitx.ErrRemoteUnreachable` (name resolution, a refused,
+Git invocations go through `internal/gitx`, which classifies the stderr of a
+failed remote command (`fetch`, `pull`, `push`, `clone`, `ls-remote`): `gitx.ErrRemoteUnreachable` (name resolution, a refused,
 timed-out, closed or reset connection) and `gitx.ErrRemoteAuth` (ssh
 `Permission denied (…)`, host key verification, HTTPS authentication or a
 401/403). Callers test the class with `errors.Is`. A classified error ends with
