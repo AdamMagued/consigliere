@@ -152,6 +152,9 @@ var worktreeLandCmd = &cobra.Command{
 direct-to-main (default): pushes HEAD → origin/<landingBranch>; on a non-ff
 rejection it rebases onto the landing branch and retries. A rebase conflict
 leaves the rebase in progress and exits 3. Prints the landed SHA on success.
+If the remote becomes unreachable after the push succeeded, the land still
+succeeds but warns "push succeeded; could not verify" with the command that
+confirms it.
 
 pr: pushes the session branch and opens a pull request via 'gh'; prints the PR
 URL.
@@ -168,7 +171,8 @@ that commit is reachable from HEAD before landing. As a convenience, passing
 this worktree's own slug (or 'session/<slug>') is tolerated and lands HEAD.
 
 Exit codes: 1 usage, 3 rebase conflict, 4 push (or local move) failed after
-retries, 5 assertion failed, 6 landing checkout blocked (local).`,
+retries, 5 assertion failed, 6 landing checkout blocked (local), 7 remote
+unreachable or credentials refused.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runWorktreeLand,
 }

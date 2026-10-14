@@ -49,6 +49,9 @@ type LandResult struct {
 	Strategy string
 	SHA      string // direct-to-main: the landed commit
 	PRURL    string // pr: the created/opened pull request URL
+	// Unverified (direct-to-main): the push succeeded but the remote could
+	// not be re-read to confirm it, because it became unreachable.
+	Unverified bool
 }
 
 // Land lands the session worktree's HEAD onto the landing branch.
@@ -176,7 +179,7 @@ func landDirect(ctx context.Context, dir, branch, landingBranch string, maxRetri
 	refspec := "HEAD:" + landingBranch
 
 	if err := gitx.Fetch(ctx, dir, "origin", landingBranch); err != nil {
-		return LandResult{}, err
+		return LandResult{}, remoteFailure(err)
 	}
 
 	pushed := false
@@ -193,7 +196,7 @@ func landDirect(ctx context.Context, dir, branch, landingBranch string, maxRetri
 		}
 		logf("push rejected (non-ff); fetching and rebasing onto %s\n", landingRef)
 		if err := gitx.Fetch(ctx, dir, "origin", landingBranch); err != nil {
-			return LandResult{}, err
+			return LandResult{}, remoteFailure(err)
 		}
 		if err := gitx.Rebase(ctx, dir, landingRef); err != nil {
 			conflicts, _ := gitx.ConflictedFiles(ctx, dir)
@@ -209,9 +212,25 @@ func landDirect(ctx context.Context, dir, branch, landingBranch string, maxRetri
 		return LandResult{}, cgerr.New(cgerr.ExitPushFail, "push did not complete")
 	}
 
-	// Defense-in-depth: confirm HEAD actually landed on the remote branch.
-	if err := gitx.Fetch(ctx, dir, "origin", landingBranch); err != nil {
-		return LandResult{}, err
+	// Defense-in-depth: confirm HEAD actually landed on the remote branch. The
+	// push has already succeeded, so a failure here must not read as a failed
+	// land: it means only that the remote could not be re-read.
+	if err := fetchToVerify(ctx, dir, landingBranch, logf); err != nil {
+		confirm := fmt.Sprintf("once the remote is reachable, fetch and confirm with `git merge-base --is-ancestor HEAD %s`", landingRef)
+		if !errors.Is(err, gitx.ErrRemoteUnreachable) {
+			return LandResult{}, cgerr.Wrap(cgerr.ExitAssertFail,
+				fmt.Errorf("push succeeded; could not verify: %w\n%s", err, confirm))
+		}
+		// git push exited 0, so the remote accepted the ref update; only the
+		// read-back is missing. Report success with a warning, not a failure.
+		landed, rerr := gitx.RevParse(ctx, dir, "HEAD")
+		if rerr != nil {
+			return LandResult{}, rerr
+		}
+		logf("warning: push succeeded; could not verify — the remote was still unreachable after %d retries: %v\n  %s\n",
+			verifyRetries, err, confirm)
+		syncLandingCheckout(ctx, dir, landingBranch, logf)
+		return LandResult{Strategy: workspace.StrategyDirectToMain, SHA: landed, Unverified: true}, nil
 	}
 	if !gitx.IsAncestor(ctx, dir, "HEAD", landingRef) {
 		return LandResult{}, cgerr.New(cgerr.ExitAssertFail,
@@ -224,6 +243,35 @@ func landDirect(ctx context.Context, dir, branch, landingBranch string, maxRetri
 	logf("assertion passed: %s is on %s\n", landed, landingRef)
 	syncLandingCheckout(ctx, dir, landingBranch, logf)
 	return LandResult{Strategy: workspace.StrategyDirectToMain, SHA: landed}, nil
+}
+
+// verifyFetch is the post-push verification fetch. A variable so tests can make
+// the remote unreachable after a push that succeeded.
+var verifyFetch = gitx.Fetch
+
+// verifyRetries is how many times the verification fetch is retried while the
+// remote is unreachable, verifyRetryDelay the pause before each retry (a
+// variable so tests can shorten it).
+const verifyRetries = 2
+
+var verifyRetryDelay = 3 * time.Second
+
+// fetchToVerify runs the verification fetch, retrying only an unreachable
+// remote: a transient network drop right after a push is the common case,
+// while any other failure would fail the same way again.
+func fetchToVerify(ctx context.Context, dir, landingBranch string, logf func(string, ...any)) error {
+	for attempt := 0; ; attempt++ {
+		err := verifyFetch(ctx, dir, "origin", landingBranch)
+		if err == nil || !errors.Is(err, gitx.ErrRemoteUnreachable) || attempt == verifyRetries {
+			return err
+		}
+		logf("verification fetch failed (remote unreachable); retrying in %s\n", verifyRetryDelay)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(verifyRetryDelay):
+		}
+	}
 }
 
 // syncLandingCheckout brings the local landing branch up to the commit just
@@ -486,7 +534,7 @@ func landPR(ctx context.Context, dir, branch, landingBranch string, logf func(st
 	// Publish the session branch so the PR has a head to track.
 	logf("pushing %s → origin/%s\n", branch, branch)
 	if err := gitx.Push(ctx, dir, "origin", "HEAD:refs/heads/"+branch); err != nil {
-		return LandResult{}, cgerr.New(cgerr.ExitPushFail, "pushing session branch: %v", err)
+		return LandResult{}, cgerr.New(cgerr.ExitPushFail, "pushing session branch: %w", err)
 	}
 	// Open (or surface the existing) PR. `gh pr create` prints the URL; if a PR
 	// already exists for this head it errors, so fall back to `gh pr view`.

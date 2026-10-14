@@ -51,9 +51,30 @@ these. Defined in `internal/cgerr`:
 | 4 | `ExitPushFail` | push to the remote (or, under `local`, the move of the landing branch) failed after retries |
 | 5 | `ExitAssertFail` | a post-operation assertion failed |
 | 6 | `ExitLandingBlocked` | `local` land only: the checkout holding the landing branch cannot fast-forward (a file in the way, or a rebase in progress) |
+| 7 | `ExitRemote` | a fetch against `origin` failed because the remote could not be reached or did not accept the credentials (`cg worktree create`, `remove`, `land`) |
 
 `cg worktree create` exits **2** when the target branch/worktree has unlanded
 commits (unless `--force`).
+
+### Remote failures
+
+Every git invocation goes through `internal/gitx`, which classifies a failed
+command's stderr: `gitx.ErrRemoteUnreachable` (name resolution, a refused,
+timed-out, closed or reset connection) and `gitx.ErrRemoteAuth` (ssh
+`Permission denied (…)`, host key verification, HTTPS authentication or a
+401/403). Callers test the class with `errors.Is`. A classified error ends with
+a line naming the class and what to check; the text names no tool or vendor.
+The match leans on ssh and libcurl messages, which are not translated; git's
+own messages are, so commands that talk to a remote (`fetch`, `pull`, `push`,
+`clone`, `ls-remote`) run with `LC_ALL=C`. Any other failure, and one with no
+stderr, is unclassified and keeps its previous exit code.
+
+When the verification fetch after a successful `direct-to-main` push finds the
+remote unreachable, `cg worktree land` retries it twice, then exits **0** with
+the landed SHA and a warning, `push succeeded; could not verify`, naming
+`git merge-base --is-ancestor HEAD origin/<landingBranch>` to confirm once the
+remote is back. Any other verification failure exits **5** and also says the
+push succeeded.
 
 ## Remote-free workspaces (`local` strategy)
 
