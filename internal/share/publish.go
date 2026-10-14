@@ -317,6 +317,9 @@ func (p *PublishPlan) stage(ctx context.Context) error {
 	if err := writeTree(p.Dir, files); err != nil {
 		return err
 	}
+	if err := unstageCaseRenames(ctx, p.Dir, files); err != nil {
+		return err
+	}
 	// --force: a user's global gitignore must not silently drop a published
 	// file while the manifest still lists it.
 	if _, err := gitx.Run(ctx, p.Dir, "add", "-A", "--force"); err != nil {
@@ -335,6 +338,45 @@ func (p *PublishPlan) stage(ctx context.Context) error {
 		}
 	}
 	return p.diff(ctx, &manifest)
+}
+
+// unstageCaseRenames drops each index entry whose path is rendered again in
+// different letter case only (Case.md, now case.md). On a case-insensitive
+// filesystem (macOS and Windows by default) git matches an index entry to a
+// file whatever its case, so `add` would update the old entry and keep the old
+// name. Dropped, the file is added under its new name. Only these entries are
+// dropped: the rest keep their index entries, and with them git's check that
+// leaves a file already stored with CRLF alone under core.autocrlf. A renamed
+// file is a new path, so like any added file it gets no such exemption.
+func unstageCaseRenames(ctx context.Context, dir string, files map[string]string) error {
+	folded := make(map[string]bool, len(files))
+	for f := range files {
+		folded[strings.ToLower(f)] = true
+	}
+	indexed, err := lsFiles(ctx, dir)
+	if err != nil {
+		return err
+	}
+	var stale []string
+	for _, f := range indexed {
+		if _, exact := files[f]; !exact && folded[strings.ToLower(f)] {
+			stale = append(stale, f)
+		}
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	// --literal-pathspecs: a file name is a path, never a glob. Chunked, so a
+	// folder of many renamed files stays under Windows' command-line limit.
+	for len(stale) > 0 {
+		n := min(len(stale), 200)
+		args := append([]string{"--literal-pathspecs", "rm", "-q", "--cached", "--"}, stale[:n]...)
+		if _, err := gitx.Run(ctx, dir, args...); err != nil {
+			return err
+		}
+		stale = stale[n:]
+	}
+	return nil
 }
 
 // diff fills Projects, Removed and Changed from the staged tree.
