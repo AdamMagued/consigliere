@@ -217,7 +217,9 @@ func landDirect(ctx context.Context, dir, branch, landingBranch string, maxRetri
 	// land: it means only that the remote could not be re-read.
 	if err := fetchToVerify(ctx, dir, landingBranch, logf); err != nil {
 		confirm := fmt.Sprintf("once the remote is reachable, fetch and confirm with `git merge-base --is-ancestor HEAD %s`", landingRef)
-		if !errors.Is(err, gitx.ErrRemoteUnreachable) {
+		// A cancelled land (Ctrl-C during a retry) takes this path too: it
+		// still says the push succeeded, and git cannot run on a dead ctx.
+		if !errors.Is(err, gitx.ErrRemoteUnreachable) || ctx.Err() != nil {
 			return LandResult{}, cgerr.Wrap(cgerr.ExitAssertFail,
 				fmt.Errorf("push succeeded; could not verify: %w\n%s", err, confirm))
 		}

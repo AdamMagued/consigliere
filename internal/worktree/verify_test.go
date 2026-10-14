@@ -119,6 +119,36 @@ func TestLandOtherVerificationFailureNamesPush(t *testing.T) {
 	}
 }
 
+// Cancelling the land while the verification fetch waits to retry still says
+// the push succeeded, with the assertion exit code, not a bare git error.
+func TestLandCancelledDuringVerificationNamesPush(t *testing.T) {
+	ctx, root := setupWorkspace(t)
+	var log bytes.Buffer
+	wt, err := Create(ctx, "verify4", defaultOpts(root), &log)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	mustGit(t, ctx, wt, "commit", "--allow-empty", "-m", "feature work")
+	landCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	savedFetch, savedDelay := verifyFetch, verifyRetryDelay
+	verifyFetch = func(context.Context, string, string, ...string) error {
+		cancel()
+		return fmt.Errorf("fetch: %w", gitx.ErrRemoteUnreachable)
+	}
+	verifyRetryDelay = time.Hour // the cancellation, not the delay, ends the wait
+	t.Cleanup(func() { verifyFetch, verifyRetryDelay = savedFetch, savedDelay })
+
+	_, err = Land(landCtx, landOpts(wt), &log)
+	var coded *cgerr.CodedError
+	if !errors.As(err, &coded) || coded.Code != cgerr.ExitAssertFail {
+		t.Fatalf("err = %v, want ExitAssertFail", err)
+	}
+	if !strings.Contains(err.Error(), "push succeeded; could not verify") {
+		t.Errorf("error does not say the push succeeded: %v", err)
+	}
+}
+
 func TestRemoteFailureExitCode(t *testing.T) {
 	tests := []struct {
 		name string
@@ -151,6 +181,12 @@ func TestRemoteFailureExitCode(t *testing.T) {
 
 // cg worktree create against an origin it cannot reach exits ExitRemote, not 1.
 func TestCreateUnreachableOriginExitsRemote(t *testing.T) {
+	// A proxy from the environment would answer instead of the dead port.
+	for _, k := range []string{"http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("no_proxy", "*")
+	t.Setenv("NO_PROXY", "*")
 	ctx, root := setupWorkspace(t)
 	// A port nothing listens on: the connection is refused at once, offline too.
 	mustGit(t, ctx, root, "remote", "set-url", "origin", "http://127.0.0.1:1/repo.git")

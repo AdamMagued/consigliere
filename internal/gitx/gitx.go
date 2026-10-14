@@ -17,8 +17,9 @@ import (
 
 // Run executes `git <args...>` in dir (or the current directory if dir is "")
 // and returns trimmed stdout. On failure the error wraps git's stderr, and a
-// failure to reach or to authenticate to a remote also wraps
-// ErrRemoteUnreachable or ErrRemoteAuth, so callers can test it with errors.Is.
+// failure of a remote command (fetch, pull, push, clone, ls-remote) to reach or
+// to authenticate to the remote also wraps ErrRemoteUnreachable or
+// ErrRemoteAuth, so callers can test it with errors.Is.
 func Run(ctx context.Context, dir string, args ...string) (string, error) {
 	return RunEnv(ctx, dir, nil, args...)
 }

@@ -60,6 +60,8 @@ var remoteClasses = []remoteClass{
 		hint: "check the network connection (and any VPN or proxy in use), then retry",
 		tokens: []string{
 			"could not resolve host",    // ssh "hostname", libcurl "host:"
+			"could not resolve proxy",   // libcurl
+			"resolving timed out",       // libcurl
 			"name or service not known", // getaddrinfo
 			"operation timed out",
 			"connection timed out",
@@ -107,14 +109,19 @@ func IsRemote(err error) bool {
 }
 
 // runError builds the error for a failed `git <args...>`: the command, the
-// exec error and git's stderr, plus — when the stderr shows a remote failure —
-// a final line naming the class and what to check, with the class sentinel
-// wrapped alongside the exec error.
+// exec error and git's stderr, plus — when a command that talks to a remote
+// shows a remote failure — a final line naming the class and what to check,
+// with the class sentinel wrapped alongside the exec error. Local commands are
+// never classified: a hook they run can print "connection refused" about
+// something else entirely.
 func runError(args []string, err error, stderr string) error {
 	what := "git " + strings.Join(args, " ")
 	stderr = strings.TrimSpace(stderr)
 	if stderr == "" {
 		return fmt.Errorf("%s: %w", what, err)
+	}
+	if !touchesRemote(args) {
+		return fmt.Errorf("%s: %w: %s", what, err, stderr)
 	}
 	if c := matchRemote(stderr); c != nil {
 		return fmt.Errorf("%s: %w: %s\n%w: %s", what, err, stderr, c.err, c.hint)
@@ -123,13 +130,14 @@ func runError(args []string, err error, stderr string) error {
 }
 
 // touchesRemote reports whether a git command line talks to a remote, so its
-// messages need LC_ALL=C for classifyRemote. Leading global options (-c k=v,
-// -C dir, --flag) are skipped to find the subcommand.
+// messages need LC_ALL=C and its failures are classified. Leading global
+// options (-c k=v, -C dir, --git-dir dir, --flag=value, --flag) are skipped to
+// find the subcommand.
 func touchesRemote(args []string) bool {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
-		case a == "-c" || a == "-C":
+		case a == "-c" || a == "-C" || a == "--git-dir" || a == "--work-tree" || a == "--namespace":
 			i++ // skip the option's value
 		case strings.HasPrefix(a, "-"):
 		default:

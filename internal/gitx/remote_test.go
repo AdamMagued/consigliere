@@ -42,6 +42,7 @@ func TestClassifyRemote(t *testing.T) {
 		{"ssh kex reset", "kex_exchange_identification: read: Connection reset by peer", ErrRemoteUnreachable},
 		{"curl dns", "fatal: unable to access 'https://example.com/r.git/': Could not resolve host: example.com", ErrRemoteUnreachable},
 		{"curl connect", "fatal: unable to access 'https://example.com/r.git/': Failed to connect to example.com port 443 after 75003 ms: Couldn't connect to server", ErrRemoteUnreachable},
+		{"curl proxy", "fatal: unable to access 'https://example.com/r.git/': Could not resolve proxy: proxy.example", ErrRemoteUnreachable},
 		{"curl windows reset", "fatal: unable to access 'https://example.com/r.git/': Recv failure: Connection was reset", ErrRemoteUnreachable},
 		{"unrelated: missing ref", "fatal: couldn't find remote ref main", nil},
 		{"unrelated: not a repo", "fatal: '/no/such' does not appear to be a git repository\nfatal: Could not read from remote repository.", nil},
@@ -103,6 +104,15 @@ func TestRunErrorWrapsClass(t *testing.T) {
 	}
 }
 
+// A local command is never classified, even when a hook it ran printed a
+// network-looking message about something else.
+func TestRunErrorLeavesLocalCommandsUnclassified(t *testing.T) {
+	err := runError([]string{"commit", "-m", "x"}, &exec.ExitError{}, "hook: dial tcp 127.0.0.1:5432: connect: connection refused")
+	if IsRemote(err) {
+		t.Errorf("local command classified: %v", err)
+	}
+}
+
 // The hints are cg core text: they must not assume which tool holds the
 // user's keys or which forge hosts the remote.
 func TestRemoteHintsNameNoVendor(t *testing.T) {
@@ -128,6 +138,8 @@ func TestTouchesRemote(t *testing.T) {
 		{[]string{"ls-remote", "--heads", "u"}, true},
 		{[]string{"-c", "core.autocrlf=false", "fetch", "origin"}, true},
 		{[]string{"-C", "fetch", "status"}, false}, // "fetch" is -C's value
+		{[]string{"--git-dir", "push", "log"}, false},
+		{[]string{"--git-dir=/x/.git", "push", "origin"}, true},
 		{[]string{"--literal-pathspecs", "status"}, false},
 		{[]string{"merge", "--ff-only", "origin/main"}, false},
 		{[]string{"rev-parse", "HEAD"}, false},
