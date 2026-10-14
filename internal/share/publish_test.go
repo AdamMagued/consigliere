@@ -2,6 +2,7 @@ package share
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -378,5 +379,109 @@ func TestPublishAddedFileNeedsReview(t *testing.T) {
 	defer plan2.Close()
 	if plan2.FirstPublish() || !plan2.AddsFiles() || !plan2.NeedsReview() {
 		t.Errorf("adding a file to a published project must need the terminal review: %+v", plan2.Projects)
+	}
+}
+
+// caseInsensitiveTempDir reports whether the filesystem holding temporary
+// directories, where the publish clone lives, folds letter case.
+func caseInsensitiveTempDir(t *testing.T) bool {
+	t.Helper()
+	dir := t.TempDir()
+	write(t, dir, "probe", "x\n")
+	_, err := os.Stat(filepath.Join(dir, "PROBE"))
+	return err == nil
+}
+
+// A file renamed only in letter case must publish under its new name. On a
+// case-insensitive filesystem git keeps the old index entry for the new file
+// unless the index is rebuilt.
+func TestPublishCaseOnlyRename(t *testing.T) {
+	f := newPublishFixture(t)
+	if !caseInsensitiveTempDir(t) {
+		t.Skip("the temp filesystem is case-sensitive; a case-only rename is an ordinary rename there")
+	}
+	first := f.exports(t)
+	first["pilot"].Files["pilot/Case.md"] = "a\n"
+	first["pilot"].Files["pilot/Notes/x.md"] = "b\n"
+	f.publish(t, first)
+
+	renamed := f.exports(t)
+	renamed["pilot"].Files["pilot/case.md"] = "a\n"
+	renamed["pilot"].Files["pilot/notes/x.md"] = "b\n"
+	plan, err := PreparePublish(f.ctx, f.opts(t, renamed))
+	if err != nil {
+		t.Fatalf("PreparePublish after a case-only rename: %v", err)
+	}
+	t.Cleanup(plan.Close)
+	c := plan.Projects["pilot"]
+	if got, want := strings.Join(c.Added, ","), "case.md,notes/x.md"; got != want {
+		t.Errorf("added = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(c.Removed, ","), "Case.md,Notes/x.md"; got != want {
+		t.Errorf("removed = %q, want %q", got, want)
+	}
+	if !plan.NeedsReview() {
+		t.Error("a renamed file is a new path for the audience and needs the terminal review")
+	}
+	if _, err := plan.Commit(f.ctx); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	tree := git(t, f.ctx, f.bare, "ls-tree", "-r", "--name-only", "main")
+	for _, want := range []string{"pilot/case.md", "pilot/notes/x.md"} {
+		if !strings.Contains(tree, want) {
+			t.Errorf("share tree missing %s:\n%s", want, tree)
+		}
+	}
+	for _, gone := range []string{"pilot/Case.md", "pilot/Notes/x.md"} {
+		if strings.Contains(tree, gone) {
+			t.Errorf("share tree still has %s:\n%s", gone, tree)
+		}
+	}
+
+	// A fresh clone checks out the new names, so republishing them is a no-op.
+	if plan := f.publish(t, renamed); plan.Changed {
+		t.Errorf("republishing the renamed export must be a no-op: %+v", plan.Projects)
+	}
+}
+
+// Restaging must keep git's check that leaves a CRLF file already stored with
+// CRLF alone, so a republish under core.autocrlf (Git for Windows' default)
+// does not rewrite its line endings.
+func TestPublishKeepsStoredCRLFUnderAutocrlf(t *testing.T) {
+	f := newPublishFixture(t)
+	globalGitConfig(t, "[core]\n\tautocrlf = false\n")
+	first := f.exports(t)
+	first["pilot"].Files["pilot/crlf.md"] = "a\r\nb\r\n"
+	f.publish(t, first)
+
+	globalGitConfig(t, "[core]\n\tautocrlf = true\n")
+	again := f.exports(t)
+	again["pilot"].Files["pilot/crlf.md"] = "a\r\nb\r\n"
+	plan, err := PreparePublish(f.ctx, f.opts(t, again))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plan.Close()
+	if plan.Changed {
+		t.Errorf("an unchanged CRLF file must stay unchanged under core.autocrlf: %+v", plan.Projects)
+	}
+}
+
+// Many case-only renames at once are unstaged in chunks, each under Windows'
+// command-line limit.
+func TestPublishManyCaseOnlyRenames(t *testing.T) {
+	f := newPublishFixture(t)
+	if !caseInsensitiveTempDir(t) {
+		t.Skip("the temp filesystem is case-sensitive; a case-only rename is an ordinary rename there")
+	}
+	first, renamed := f.exports(t), f.exports(t)
+	for i := range 450 {
+		first["pilot"].Files[fmt.Sprintf("pilot/Notes/file-%03d.md", i)] = "x\n"
+		renamed["pilot"].Files[fmt.Sprintf("pilot/notes/file-%03d.md", i)] = "x\n"
+	}
+	f.publish(t, first)
+	plan := f.publish(t, renamed)
+	if c := plan.Projects["pilot"]; len(c.Added) != 450 || len(c.Removed) != 450 {
+		t.Errorf("want 450 renamed files, got %d added, %d removed", len(c.Added), len(c.Removed))
 	}
 }
